@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+enum RequirementCategory {
+  skill
+  experience
+  domain
+  education
+  location
+  other
+}
+
+enum RequirementType {
+  mandatory
+  preferred
+}
+
+enum EligibilityStatus {
+  PASS
+  FAIL
+  UNKNOWN
+}
+
+enum WorkArrangement {
+  remote
+  hybrid
+  onsite
+}
+
+enum EmploymentType {
+  full_time
+  part_time
+  contract
+  temporary
+}
+
+enum EvidenceSourceType {
+  experience
+  project
+  skill
+  certification
+  education
+}
+
+enum EligibilityClassification {
+  ELIGIBLE
+  NEEDS_REVIEW
+  NOT_ELIGIBLE
+}
+
+enum SkillCategory {
+  language
+  framework
+  database
+  cloudInfrastructure
+  dataEngineering
+  aiMl
+  search
+  professional
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Candidate {
+  id                         String               @id
+  name                       String
+  headline                   String
+  professionalSummary        String               @db.Text
+  originalProfileText        String               @db.Text
+  location                   String
+  workArrangementPreferences WorkArrangement[]    @default([])
+  industries                 String[]
+  skills                     CandidateSkill[]
+  experiences                Experience[]
+  projects                   CandidateProject[]
+  education                  Education[]
+  certifications             Certification[]
+  evidence                   CandidateEvidence[]
+  embeddings                 Embedding[]
+  matchResults               MatchResult[]
+  judgments                  EvaluationJudgment[]
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+}
+
+model Experience {
+  id               String    @id
+  candidateId      String
+  company          String
+  role             String
+  description      String    @db.Text
+  responsibilities String[]
+  startDate        String
+  endDate          String?
+  technologies     String[]
+  achievements     String[]
+  candidate        Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model SkillTaxonomy {
+  id            String           @id
+  name          String           @unique
+  category      SkillCategory
+  aliases       String[]
+  relatedSkills String[]
+  candidates    CandidateSkill[]
+}
+
+model CandidateSkill {
+  candidateId String
+  skillId     String
+  candidate   Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  skill       SkillTaxonomy @relation(fields: [skillId], references: [id], onDelete: Restrict)
+
+  @@id([candidateId, skillId])
+  @@index([skillId])
+}
+
+model CandidateProject {
+  id           String    @id
+  candidateId  String
+  name         String
+  description  String    @db.Text
+  technologies String[]
+  achievements String[]
+  candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model Education {
+  id          String    @id
+  candidateId String
+  credential  String
+  institution String?
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model Certification {
+  id          String    @id
+  candidateId String
+  name        String
+  issuer      String?
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model CandidateEvidence {
+  id              String             @id
+  candidateId     String
+  sourceType      EvidenceSourceType
+  sourceReference String
+  supportingText  String             @db.Text
+  candidate       Candidate          @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, sourceReference])
+  @@index([sourceType, sourceReference])
+}
+
+model Job {
+  id                     String               @id
+  title                  String
+  company                String
+  description            String               @db.Text
+  industry               String
+  location               String
+  workArrangement        WorkArrangement
+  employmentType         EmploymentType
+  seniority              String
+  experienceExpectations String               @db.Text
+  directDomainAliases    String[]             @default([])
+  relatedDomainAliases   String[]             @default([])
+  responsibilities       String[]
+  requirements           JobRequirement[]
+  embeddings             Embedding[]
+  matchRuns              MatchRun[]
+  retrievalRuns          RetrievalRun[]
+  judgments              EvaluationJudgment[]
+  createdAt              DateTime             @default(now())
+}
+
+model JobRequirement {
+  id                   String              @id
+  jobId                String
+  description          String              @db.Text
+  category             RequirementCategory
+  importance           Float
+  evidenceExpectations String[]
+  requirementType      RequirementType
+  assessmentCriteria   Json                @default("{}")
+  job                  Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+/// The vector(768) column is managed by SQL because Prisma does not natively expose pgvector values/operators.
+model Embedding {
+  id              String     @id @default(cuid())
+  candidateId     String?
+  jobId           String?
+  provider        String
+  model           String
+  modelVersion    String
+  sourceReference String
+  content         String     @db.Text
+  contentHash     String
+  dimensions      Int
+  createdAt       DateTime   @default(now())
+  candidate       Candidate? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  job             Job?       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, sourceReference, provider, model, modelVersion])
+  @@index([candidateId, model, modelVersion])
+  @@index([jobId, model, modelVersion])
+}
+
+model RetrievalRun {
+  id           String     @id @default(cuid())
+  jobId        String
+  strategy     String
+  queryText    String     @db.Text
+  topK         Int
+  rrfConstant  Int?
+  provider     String?
+  model        String?
+  modelVersion String?
+  dimensions   Int?
+  durationMs   Int
+  results      Json
+  createdAt    DateTime   @default(now())
+  job          Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  matchRuns    MatchRun[]
+
+  @@index([jobId, createdAt])
+}
+
+model MatchRun {
+  id                   String        @id @default(cuid())
+  jobId                String
+  retrievalMethod      String
+  rankingConfiguration Json
+  embeddingModel       String?
+  retrievalRunId       String?
+  durationMs           Int?
+  createdAt            DateTime      @default(now())
+  job                  Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  results              MatchResult[]
+  retrievalRun         RetrievalRun? @relation(fields: [retrievalRunId], references: [id], onDelete: SetNull)
+
+  @@unique([id, jobId])
+  @@index([retrievalRunId])
+}
+
+model MatchResult {
+  id                String                    @id @default(cuid())
+  matchRunId        String
+  jobId             String
+  candidateId       String
+  rank              Int
+  score             Float
+  eligibilityStatus EligibilityClassification @default(NEEDS_REVIEW)
+  signals           Json
+  explanation       String?                   @db.Text
+  matchRun          MatchRun                  @relation(fields: [matchRunId, jobId], references: [id, jobId], onDelete: Cascade)
+  candidate         Candidate                 @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([matchRunId, candidateId])
+  @@index([jobId, rank])
+}
+
+model EvaluationJudgment {
+  id                 String    @id @default(cuid())
+  jobId              String
+  candidateId        String
+  relevance          Int
+  rationale          String    @db.Text
+  evidenceReferences String[]
+  source             String    @default("manual")
+  createdAt          DateTime  @default(now())
+  job                Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidate          Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, candidateId])
+  @@index([jobId, relevance])
+}
+
+model EvaluationRun {
+  id                       String   @id @default(cuid())
+  createdAt                DateTime @default(now())
+  configuration            Json
+  results                  Json
+  durationMs               Int
+  candidateCount           Int
+  groundTruthJudgmentCount Int
+  groundTruthRelevantCount Int
+
+  @@index([createdAt])
+}
